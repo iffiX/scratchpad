@@ -1,6 +1,0 @@
-#ifndef SCRATCHPAD_LIBRARY_H
-#define SCRATCHPAD_LIBRARY_H
-
-void hello();
-
-#endif //SCRATCHPAD_LIBRARY_H
