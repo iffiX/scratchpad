@@ -3,8 +3,11 @@ project(Scratchpad)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}")
-
+set(CMAKE_INSTALL_PREFIX ${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
 add_compile_definitions(FMT_HEADER_ONLY)
+if(DEFINED VERSION_INFO)
+    add_compile_definitions(VERSION_INFO=${VERSION_INFO})
+endif()
 find_package(OpenMP)
 if (OPENMP_FOUND)
     add_compile_definitions(USE_OPENMP)
@@ -34,10 +37,10 @@ ExternalProject_Add(
         COMMAND ${MYPAINT_DIR}/configure
         --srcdir=${MYPAINT_DIR} --prefix=${MYPAINT_BUILD}
         BUILD_COMMAND make VERBOSE=1 CFLAGS=${MYPAINT_CFLAGS}
-        INSTALL_COMMAND make install && make clean
+        INSTALL_COMMAND make install && make clean && ${CMAKE_COMMAND} -E copy_directory ${MYPAINT_BUILD}/lib ${CMAKE_INSTALL_PREFIX}
         BUILD_BYPRODUCTS ${MYPAINT_DYNAMIC_LIB}
 )
-add_library(mypaint STATIC IMPORTED GLOBAL)
+add_library(mypaint SHARED IMPORTED GLOBAL)
 add_dependencies(mypaint libmypaint)
 
 # make directories in advance to prevent cmake from complaining
@@ -78,3 +81,6 @@ target_include_directories(
         ${MYPAINT_INCLUDES}
         ${PYTHON_NUMPY_INCLUDE_DIR}
 )
+set_target_properties(scratchpad PROPERTIES LINK_FLAGS "-Wl,-rpath,'$ORIGIN'")
+install(TARGETS scratchpad
+        LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX})

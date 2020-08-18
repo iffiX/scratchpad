@@ -37,24 +37,21 @@ def check_for_cmake():
 class CMakeExtension(Extension):
     """
     setuptools.Extension for cmake
+
+    The install target will be built, and all files in ${CMAKE_INSTALL_PREFIX} will be copied.
     """
 
-    def __init__(self, name, cmake_name=None, sourcedir=''):
+    def __init__(self, name, version="", sourcedir=""):
         """
         Args:
             name: Name of the extension, the python dotted name which will be used to
                 determine build location, install location, and import name.
                 Eg: "somepachage", or "myPackage.myModule"
 
-            cmake_name: CMake target name of the extension.
             sourcedir: The directory where sources are located, by default it is the
                 current working directory.
         """
         check_for_cmake()
-        if cmake_name is None:
-            cmake_name = name
-        self.cmake_name = cmake_name
-
         # find sources inside the source directory
         # needed by sdist command, if we would like to publish source distribution
         sources = []
@@ -65,6 +62,7 @@ class CMakeExtension(Extension):
                     sources.append(os.path.join(dirpath, file))
 
         Extension.__init__(self, name, sources=sources)
+        self.version = version
         self.sourcedir = os.path.abspath(sourcedir)
 
 
@@ -74,6 +72,46 @@ class CMakeBuildExt(build_ext):
     You can add cmake args by modify CMakeBuildExt.cmake_args
     """
     cmake_args = []
+
+    def copy_extensions_to_source(self):
+        """
+        Support inplace installation used in::
+            setup.py develop
+        or::
+            pip install -e .
+        """
+        from distutils.file_util import copy_file
+        from distutils.dir_util import copy_tree
+        build_py = self.get_finalized_command('build_py')
+        for ext in self.extensions:
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+            modpath = fullname.split('.')
+            package = '.'.join(modpath[:-1])
+            package_dir = build_py.get_package_dir(package)
+
+            if isinstance(ext, CMakeExtension):
+                old_inplace, self.inplace = self.inplace, 0
+                # copy install directory
+                output_dir = os.path.abspath(
+                    os.path.dirname(self.get_ext_fullpath(ext.name)))
+                self.inplace = old_inplace
+                copy_tree(output_dir, package_dir)
+            else:
+
+                dest_filename = os.path.join(package_dir,
+                                             os.path.basename(filename))
+                src_filename = os.path.join(self.build_lib, filename)
+
+                # Always copy, even if source is older than destination, to ensure
+                # that the right extensions for the current Python/platform are
+                # used.
+                copy_file(
+                    src_filename, dest_filename, verbose=self.verbose,
+                    dry_run=self.dry_run
+                )
+                if ext._needs_stub:
+                    self.write_stub(package_dir or os.curdir, ext, True)
 
     def build_extension(self, ext):
         check_for_cmake()
@@ -87,10 +125,10 @@ class CMakeBuildExt(build_ext):
             # VERSION_INFO could be used in the pybind11 interface c++ file.
             cmake_args = [CMAKE_EXE,
                           ext.sourcedir,
-                          '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + output_dir,
+                          '-DCMAKE_INSTALL_PREFIX=' + output_dir,
                           '-DCMAKE_BUILD_TYPE=' + build_type,
                           '-DPYTHON_EXECUTABLE=' + sys.executable,
-                          '-DVERSION_INFO=\\"{}\\"'.format(self.distribution.get_version())]
+                          '-DVERSION_INFO="{}"'.format(ext.version)]
 
             # read args defined in CMAKE_COMMON_VARIABLES
             # Split arguments with shlex so '-G "MinGW Makefiles"' may be used.
@@ -112,7 +150,7 @@ class CMakeBuildExt(build_ext):
             subprocess.check_call([CMAKE_EXE,
                                    '--build', '.',
                                    '-j',
-                                   '--target', ext.cmake_name],
+                                   '--target', 'install'],
                                   cwd=self.build_temp,
                                   env=env)
             # print an empty line to seperate print results
