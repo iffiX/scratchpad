@@ -130,7 +130,7 @@ void ScratchPad::draw(int layer, int brush, const Setting &setting,
     }
 }
 
-py::array &&ScratchPad::renderLayer(int layer, const py::dtype &dtype) {
+py::array ScratchPad::renderLayer(int layer, const py::dtype &dtype) {
     if (dtype.has_fields())
         throw std::invalid_argument("Only support rendering as a flat floating array or integral array!");
     if (layer >= _layers.size() or layer < 0)
@@ -149,7 +149,7 @@ py::array &&ScratchPad::renderLayer(int layer, const py::dtype &dtype) {
     return std::move(array);
 }
 
-py::array &&ScratchPad::render(const py::dtype &dtype) {
+py::array ScratchPad::render(const py::dtype &dtype) {
     if (dtype.has_fields())
         throw std::invalid_argument("Only support rendering as a flat floating array or integral array!");
 
