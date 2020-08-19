@@ -4,3 +4,6 @@
 [submodule "lib/pybind11"]
 	path = lib/pybind11
 	url = https://github.com/pybind/pybind11.git
+[submodule "lib/mypaint-brushes"]
+	path = lib/mypaint-brushes
+	url = https://github.com/mypaint/mypaint-brushes

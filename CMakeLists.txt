@@ -64,23 +64,23 @@ endif()
 # Include path
 ################################################################
 pybind11_add_module(
-        scratchpad SHARED
+        scratchpad.internal SHARED
         csrc/scratchpad.cpp
         csrc/b_scratchpad.cpp
         csrc/init.cpp
 )
 
 target_link_libraries(
-        scratchpad PUBLIC
+        scratchpad.internal PUBLIC
         mypaint
 )
 target_include_directories(
-        scratchpad PUBLIC
+        scratchpad.internal PUBLIC
         lib
         ${CMAKE_CURRENT_SOURCE_DIR}/csrc
         ${MYPAINT_INCLUDES}
         ${PYTHON_NUMPY_INCLUDE_DIR}
 )
-set_target_properties(scratchpad PROPERTIES LINK_FLAGS "-Wl,-rpath,'$ORIGIN'")
-install(TARGETS scratchpad
+set_target_properties(scratchpad.internal PROPERTIES LINK_FLAGS "-Wl,-rpath,'$ORIGIN'")
+install(TARGETS scratchpad.internal
         LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX})
