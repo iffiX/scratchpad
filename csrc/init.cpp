@@ -2,7 +2,21 @@
 #include "b_scratchpad.h"
 #include <fmt/format.h>
 
+#ifdef USE_OPENMP
+
+#include <omp.h>
+
+#endif
+
+void set_omp_max_threads(int num) {
+    if (num <= 0)
+        throw std::invalid_argument("Thread num must be a number larger than 0!");
+    int cores = omp_get_max_threads();
+    omp_set_num_threads(cores > num ? num : cores);
+}
+
 PYBIND11_MODULE(internal, m) {
+    m.def("set_omp_max_threads", &set_omp_max_threads);
     py::class_<Setting>(m,
                         "Setting",
                         R"(Settings of the used brush.)")

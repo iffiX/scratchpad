@@ -5,5 +5,8 @@ __all__ = [
     "Point",
     "Setting",
     "ScratchPad",
-    "BatchedScratchPad"
+    "BatchedScratchPad",
+    "set_omp_max_threads"
 ]
+
+set_omp_max_threads(4)

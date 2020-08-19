@@ -22,9 +22,9 @@ struct Setting {
     explicit Setting(float opacity = 0.0,
                      float radius = 0.5,
                      float hardness = 0.8,
-                     float color_h = 0.0,
-                     float color_s = 0.0,
-                     float color_v = 0.0) :
+                     float color_h = 0.5,
+                     float color_s = 0.5,
+                     float color_v = 0.5) :
             opacity(opacity), radius(radius), hardness(hardness),
             color_h(color_h), color_s(color_s), color_v(color_v) {}
 };
@@ -38,8 +38,8 @@ struct Point {
     float dtime;
 
     explicit Point(float x = 0.0, float y = 0.0,
-                   float xtilt = 0.0, float ytilt = 0.0,
-                   float pressure = 0.0, float dtime = 0.1) :
+                   float xtilt = 0.5, float ytilt = 0.5,
+                   float pressure = 0.5, float dtime = 1) :
             x(x), y(y), xtilt(xtilt), ytilt(ytilt),
             pressure(pressure), dtime(dtime) {}
 };
@@ -81,7 +81,10 @@ private:
     std::vector<MyPaintFixedTiledSurface *> _layers;
     std::vector<float> _layer_opacity;
 
-    py::array _convertFix15(const uint16_t *in_layer, const py::dtype &dtype);
+    static py::array _convertFix15(const uint16_t *in_layer, const py::dtype &dtype, int r_w, int r_h, int w, int h);
+
+    template<typename T>
+    static void _reformat(T *in_layer, T *out_layer, int r_w, int r_h, int tile_size);
 
     template<typename T, std::enable_if_t<std::is_floating_point<T>::value, int> = 0>
     static void _convertFix15ToFloat(const uint16_t *in_layer, T *out_layer, int pixel_num);

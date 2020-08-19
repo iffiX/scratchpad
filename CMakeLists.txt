@@ -14,6 +14,13 @@ if (OPENMP_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
+
+if (CMAKE_BUILD_TYPE EQUAL "RELEASE")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS} -Ofast -ftree-vectorize -fopt-info-vec-optimized
+                    -march=native -mtune=native -funsafe-math-optimizations -funsafe-loop-optimizations")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS} -Ofast -ftree-vectorize -fopt-info-vec-optimized
+                    -march=native -mtune=native -funsafe-math-optimizations -funsafe-loop-optimizations")
+endif()
 ################################################################
 # Configuration for depended libraries
 ################################################################

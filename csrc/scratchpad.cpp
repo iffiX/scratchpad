@@ -2,7 +2,27 @@
 #include "fix15.h"
 #include <cmath>
 
+#define CEIL(a, b) ( ((a) + (b) - 1) / (b))
+#define ALIGN(a, b) (CEIL(a, b) * (b))
 #define IN_RANGE(var, low, high) (((var) <= (high)) && ((var) >= (low)))
+
+#define CONVERT_AND_RETURN_F(type) \
+    auto tmp = new type[r_w * r_h * 4];\
+    auto result = new type[r_w * r_h * 4];\
+    _convertFix15ToFloat<type>(in_layer, tmp, r_w * r_h);\
+    _reformat<type>(tmp, result, r_w, r_h, MYPAINT_TILE_SIZE);\
+    delete [] tmp;\
+    auto capsule = py::capsule(result, [](void *v) { delete static_cast<type*>(v); });\
+    return std::move(py::array({h, w, 4}, {r_w * 4 * s, 4 * s, s}, result, capsule))
+
+#define CONVERT_AND_RETURN_I(type) \
+    auto tmp = new type[r_w * r_h * 4];\
+    auto result = new type[r_w * r_h * 4];\
+    _convertFix15ToInt<type>(in_layer, tmp, r_w * r_h);\
+    _reformat<type>(tmp, result, r_w, r_h, MYPAINT_TILE_SIZE);\
+    delete [] tmp;\
+    auto capsule = py::capsule(result, [](void *v) { delete static_cast<type*>(v); });\
+    return std::move(py::array({h, w, 4}, {r_w * 4 * s, 4 * s, s}, result, capsule))
 
 
 ScratchPad::~ScratchPad() {
@@ -117,17 +137,20 @@ void ScratchPad::draw(int layer, int brush, const Setting &setting,
             and IN_RANGE(point.xtilt, 0, 1)
             and IN_RANGE(point.ytilt, 0, 1)
             and IN_RANGE(point.pressure, 0, 1)
-            and IN_RANGE(point.dtime, 0, 1))
+            and IN_RANGE(point.dtime, 0, 1)) {
             mypaint_brush_stroke_to(brush_ptr, layer_ptr,
                                     point.x * _width,
                                     point.y * _height,
                                     point.pressure,
                                     point.xtilt * 2 - 1,
                                     point.ytilt * 2 - 1,
-                                    point.dtime * 0.1 + 1e-4);
+                                    point.dtime * 0.1);
+        }
         else
             throw std::invalid_argument("Invalid point value, all point values must be in range of 0.0 to 1.0!");
     }
+    MyPaintRectangle roi;
+    mypaint_surface_end_atomic(layer_ptr, &roi);
 }
 
 py::array ScratchPad::renderLayer(int layer, const py::object &dtype) {
@@ -143,12 +166,25 @@ py::array ScratchPad::renderLayer(int layer, const py::dtype &dtype) {
     // Start a new operation request
     MyPaintTileRequest request;
 
+    // Note: we are not initializing the request for each tile in the surface
+    // because in a fixed tiled surface
+    // there is only one chunk of linear memory, with:
+    // width aligned to CEIL_DIV(width, TILE_WIDTH) * TILE_WIDTH
+    // height aligned to CEIL_DIV(height, TILE_HEIGHT) * TILE_HEIGHT
+    // we just need this request to get the pointer to internal linear memory
+
+    // Note: the linear memory is tile by tile, and not row by row! Therefore we need reformat
+    // to change the memory layout.
+
+    int real_width = ALIGN(_width, MYPAINT_TILE_SIZE);
+    int real_height = ALIGN(_height, MYPAINT_TILE_SIZE);
+
     auto layer_ptr = (MyPaintTiledSurface*)_layers[layer];
     // request to operate on mipmap_level=0, tx=0, ty=0
     // in fixed tiled surface tx, ty are absolute coordinates of the starting pixel.
     mypaint_tile_request_init(&request, 0, 0, 0, TRUE);
     mypaint_tiled_surface_tile_request_start(layer_ptr, &request);
-    auto array = _convertFix15(request.buffer, dtype);
+    auto array = _convertFix15(request.buffer, dtype, real_width, real_height, _width, _height);
     mypaint_tiled_surface_tile_request_end(layer_ptr, &request);
     return std::move(array);
 }
@@ -165,17 +201,21 @@ py::array ScratchPad::render(const py::dtype &dtype) {
     if (_layers.empty())
         throw py::index_error();
 
-    auto buffer_1 = new uint16_t[_width * _height * 4];
-    auto buffer_2 = new uint16_t[_width * _height * 4];
+    // copy the first layer to ping-pong buffer.
+    MyPaintTileRequest first_request;
+
+    int real_width = ALIGN(_width, MYPAINT_TILE_SIZE);
+    int real_height = ALIGN(_height, MYPAINT_TILE_SIZE);
+
+    auto buffer_1 = new uint16_t[real_width * real_height * 4];
+    auto buffer_2 = new uint16_t[real_width * real_height * 4];
 
     // ping-pong buffer, when false, buffer_2 is output, when true, buffer_1 is output
     bool ping_pong = false;
 
-    // copy the first layer to ping-pong buffer.
-    MyPaintTileRequest first_request;
     mypaint_tile_request_init(&first_request, 0, 0, 0, TRUE);
     mypaint_tiled_surface_tile_request_start((MyPaintTiledSurface*)_layers[0], &first_request);
-    memcpy(buffer_1, first_request.buffer, _width * _height * 4 * sizeof(uint16_t));
+    memcpy(buffer_1, first_request.buffer, real_width * real_height * 4 * sizeof(uint16_t));
     mypaint_tiled_surface_tile_request_end((MyPaintTiledSurface*)_layers[0], &first_request);
 
     for (size_t i=1; i < _layers.size(); i++) {
@@ -186,9 +226,9 @@ py::array ScratchPad::render(const py::dtype &dtype) {
         mypaint_tiled_surface_tile_request_start(layer_ptr, &request);
 
         if (ping_pong)
-            _blend(request.buffer, buffer_2, buffer_1, _layer_opacity[i], _width * _height);
+            _blend(request.buffer, buffer_2, buffer_1, _layer_opacity[i], real_width * real_height);
         else
-            _blend(request.buffer, buffer_1, buffer_2, _layer_opacity[i], _width * _height);
+            _blend(request.buffer, buffer_1, buffer_2, _layer_opacity[i], real_width * real_height);
 
         mypaint_tiled_surface_tile_request_end(layer_ptr, &request);
         ping_pong = !ping_pong;
@@ -197,57 +237,42 @@ py::array ScratchPad::render(const py::dtype &dtype) {
     // Note: ping_pong is inverted here because of ping_pong = !ping_pong
     if (ping_pong) {
         delete [] buffer_1;
-        auto array = _convertFix15(buffer_2, dtype);
+        auto array = _convertFix15(buffer_2, dtype, real_width, real_height, _width, _height);
+        delete [] buffer_2;
         return std::move(array);
     }
     else {
         delete [] buffer_2;
-        auto array = _convertFix15(buffer_1, dtype);
+        auto array = _convertFix15(buffer_1, dtype, real_width, real_height, _width, _height);
+        delete [] buffer_1;
         return std::move(array);
     }
 }
 
-py::array ScratchPad::_convertFix15(const uint16_t *in_layer, const py::dtype &dtype) {
+py::array ScratchPad::_convertFix15(const uint16_t *in_layer, const py::dtype &dtype, int r_w, int r_h, int w, int h) {
+    int s = dtype.itemsize();
     if (dtype.kind() == 'f') {
         if (dtype.itemsize() == 4) {
-            auto result = new float[_width * _height * 4];
-            _convertFix15ToFloat<float>(in_layer, result, _width * _height);
-            auto capsule = py::capsule(result, [](void *v) { delete static_cast<float*>(v); });
-            return std::move(py::array({_width, _height, 4}, result, capsule));
+            CONVERT_AND_RETURN_F(float);
         }
-        else if (dtype.itemsize() == 4) {
-            auto result = new double[_width * _height * 4];
-            _convertFix15ToFloat<double>(in_layer, result, _width * _height);
-            auto capsule = py::capsule(result, [](void *v) { delete static_cast<double*>(v); });
-            return std::move(py::array({_width, _height, 4}, result, capsule));
+        else if (dtype.itemsize() == 8) {
+            CONVERT_AND_RETURN_F(double);
         }
         else
             throw std::invalid_argument("Only float32 and float64 are supported in all floating types!");
     }
     else if (dtype.kind() == 'B') {
-        auto result = new uint8_t[_width * _height * 4];
-        _convertFix15ToInt<uint8_t >(in_layer, result, _width * _height);
-        auto capsule = py::capsule(result, [](void *v) { delete static_cast<uint8_t*>(v); });
-        return std::move(py::array({_width, _height, 4}, result, capsule));
+        CONVERT_AND_RETURN_I(uint8_t);
     }
     else if (dtype.kind() == 'i') {
         if (dtype.itemsize() == 2) {
-            auto result = new int16_t[_width * _height * 4];
-            _convertFix15ToInt<int16_t>(in_layer, result, _width * _height);
-            auto capsule = py::capsule(result, [](void *v) { delete static_cast<int16_t*>(v); });
-            return std::move(py::array({_width, _height, 4}, result, capsule));
+            CONVERT_AND_RETURN_I(int16_t);
         }
         else if (dtype.itemsize() == 4) {
-            auto result = new int32_t[_width * _height * 4];
-            _convertFix15ToInt<int32_t>(in_layer, result, _width * _height);
-            auto capsule = py::capsule(result, [](void *v) { delete static_cast<int32_t*>(v); });
-            return std::move(py::array({_width, _height, 4}, result, capsule));
+            CONVERT_AND_RETURN_I(int32_t);
         }
         else if (dtype.itemsize() == 8) {
-            auto result = new int64_t[_width * _height * 4];
-            _convertFix15ToInt<int64_t>(in_layer, result, _width * _height);
-            auto capsule = py::capsule(result, [](void *v) { delete static_cast<int64_t*>(v); });
-            return std::move(py::array({_width, _height, 4}, result, capsule));
+            CONVERT_AND_RETURN_I(int64_t);
         }
         else
             throw std::invalid_argument("Only int16, int32, int64, uint8, uint16, uint32, uint64 are supported "
@@ -255,28 +280,16 @@ py::array ScratchPad::_convertFix15(const uint16_t *in_layer, const py::dtype &d
     }
     else if (dtype.kind() == 'u') {
         if (dtype.itemsize() == 1) {
-            auto result = new uint8_t[_width * _height * 4];
-            _convertFix15ToInt<uint8_t >(in_layer, result, _width * _height);
-            auto capsule = py::capsule(result, [](void *v) { delete static_cast<uint8_t*>(v); });
-            return std::move(py::array({_width, _height, 4}, result, capsule));
+            CONVERT_AND_RETURN_I(uint8_t);
         }
         else if (dtype.itemsize() == 2) {
-            auto result = new uint16_t[_width * _height * 4];
-            _convertFix15ToInt<uint16_t>(in_layer, result, _width * _height);
-            auto capsule = py::capsule(result, [](void *v) { delete static_cast<uint16_t*>(v); });
-            return std::move(py::array({_width, _height, 4}, result, capsule));
+            CONVERT_AND_RETURN_I(uint16_t);
         }
         else if (dtype.itemsize() == 4) {
-            auto result = new uint32_t[_width * _height * 4];
-            _convertFix15ToInt<uint32_t>(in_layer, result, _width * _height);
-            auto capsule = py::capsule(result, [](void *v) { delete static_cast<uint32_t*>(v); });
-            return std::move(py::array({_width, _height, 4}, result, capsule));
+            CONVERT_AND_RETURN_I(uint32_t);
         }
         else if (dtype.itemsize() == 8) {
-            auto result = new uint64_t[_width * _height * 4];
-            _convertFix15ToInt<uint64_t>(in_layer, result, _width * _height);
-            auto capsule = py::capsule(result, [](void *v) { delete static_cast<uint64_t*>(v); });
-            return std::move(py::array({_width, _height, 4}, result, capsule));
+            CONVERT_AND_RETURN_I(uint64_t);
         }
         else
             throw std::invalid_argument("Only int16, int32, int64, uint8, uint16, uint32, uint64 are supported "
@@ -286,6 +299,25 @@ py::array ScratchPad::_convertFix15(const uint16_t *in_layer, const py::dtype &d
         throw std::invalid_argument("Only floating types and integral are supported!");
 }
 
+template<typename T>
+void ScratchPad::_reformat(T *in_layer, T *out_layer, int r_w, int r_h, int tile_size) {
+    int stride = tile_size * tile_size * 4;
+    int total_size = r_w * r_h * 4;
+    int tile_cols = r_w / tile_size;
+
+    #pragma omp parallel for
+    for(int offset = 0; offset < total_size; offset += stride) {
+        int t_id = offset / stride;
+        int g_row = (t_id / tile_cols) * tile_size;
+        int g_col = (t_id % tile_cols) * tile_size;
+
+        for(int t_row=0; t_row < tile_size; t_row++) {
+            int in_offset = offset + t_row * tile_size * 4;
+            int out_offset = (r_w * (g_row + t_row) + g_col) * 4;
+            memcpy(out_layer + out_offset, in_layer + in_offset, tile_size * sizeof(T) * 4);
+        }
+    }
+}
 
 template<typename T, std::enable_if_t<std::is_floating_point<T>::value, int>>
 void ScratchPad::_convertFix15ToFloat(const uint16_t *in_layer, T *out_layer, int pixel_num) {
