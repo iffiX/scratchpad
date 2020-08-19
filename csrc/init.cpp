@@ -2,7 +2,7 @@
 #include "b_scratchpad.h"
 #include <fmt/format.h>
 
-PYBIND11_MODULE(scratchpad, m) {
+PYBIND11_MODULE(internal, m) {
     py::class_<Setting>(m,
                         "Setting",
                         R"(Settings of the used brush.)")
@@ -95,8 +95,8 @@ PYBIND11_MODULE(scratchpad, m) {
             .def("get_layer_num", &ScratchPad::getLayerNum)
             .def("get_pad_size", &ScratchPad::getPadSize)
             .def("draw", &ScratchPad::draw)
-            .def("render_layer", &ScratchPad::renderLayer)
-            .def("render", &ScratchPad::render);
+            .def("render_layer", py::overload_cast<int, const py::object &>(&ScratchPad::renderLayer))
+            .def("render", py::overload_cast<const py::object &>(&ScratchPad::render));
 
     py::class_<BatchedScratchPad>(m, "BatchedScratchPad")
             .def(py::init<int>(),
@@ -112,8 +112,11 @@ PYBIND11_MODULE(scratchpad, m) {
             .def("get_layer_num", &BatchedScratchPad::getLayerNum)
             .def("get_pad_size", &BatchedScratchPad::getPadSize)
             .def("draw", &BatchedScratchPad::draw)
-            .def("render_layer", &BatchedScratchPad::renderLayer)
-            .def("render", &BatchedScratchPad::render);
+            .def("render_layer", py::overload_cast<const std::vector<int> &,
+                                                   const std::vector<int> &,
+                                                   const py::object &>(&BatchedScratchPad::renderLayer))
+            .def("render", py::overload_cast<const std::vector<int> &,
+                                             const py::object &>(&BatchedScratchPad::render));
 
 #ifdef VERSION_INFO
     m.attr("__version__") = VERSION_INFO;

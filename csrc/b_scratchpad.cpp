@@ -98,7 +98,13 @@ void BatchedScratchPad::draw(const std::vector<int> &pad,
 
 std::vector<py::array> BatchedScratchPad::renderLayer(const std::vector<int> &pad,
                                                       const std::vector<int> &layer,
-                                                      const pybind11::dtype &dtype) {
+                                                      const py::object &dtype) {
+    return std::move(renderLayer(pad, layer, py::dtype::from_args(dtype)));
+}
+
+std::vector<py::array> BatchedScratchPad::renderLayer(const std::vector<int> &pad,
+                                                      const std::vector<int> &layer,
+                                                      const py::dtype &dtype) {
     if (pad.size() != layer.size())
         throw std::invalid_argument("Size of pad ids and layer ids doesn't match");
     std::vector<std::future<py::array>> results;
@@ -108,7 +114,8 @@ std::vector<py::array> BatchedScratchPad::renderLayer(const std::vector<int> &pa
         if (pad_idx >= _pads.size() or pad_idx < 0)
             throw py::index_error();
         results.emplace_back(
-                _pool.enqueue(&ScratchPad::renderLayer, &_pads[pad_idx], layer[i], dtype));
+                _pool.enqueue((py::array (ScratchPad::*)(int, const py::dtype &))&ScratchPad::renderLayer,
+                              &_pads[pad_idx], layer[i], dtype));
     }
     for(auto &fut: results)
         ret_results.emplace_back(fut.get());
@@ -116,14 +123,20 @@ std::vector<py::array> BatchedScratchPad::renderLayer(const std::vector<int> &pa
 }
 
 std::vector<py::array> BatchedScratchPad::render(const std::vector<int> &pad,
-                                                 const pybind11::dtype &dtype) {
+                                                 const py::object &dtype) {
+    return std::move(render(pad, py::dtype::from_args(dtype)));
+}
+
+std::vector<py::array> BatchedScratchPad::render(const std::vector<int> &pad,
+                                                 const py::dtype &dtype) {
     std::vector<std::future<py::array>> results;
     std::vector<py::array> ret_results;
     for(auto pad_idx: pad) {
         if (pad_idx >= _pads.size() or pad_idx < 0)
             throw py::index_error();
         results.emplace_back(
-                _pool.enqueue(&ScratchPad::render, &_pads[pad_idx], dtype));
+                _pool.enqueue((py::array (ScratchPad::*)(const py::dtype &))&ScratchPad::render,
+                              &_pads[pad_idx], dtype));
     }
     for(auto &fut: results)
         ret_results.emplace_back(fut.get());

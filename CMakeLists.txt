@@ -3,7 +3,6 @@ project(Scratchpad)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}")
-set(CMAKE_INSTALL_PREFIX ${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
 add_compile_definitions(FMT_HEADER_ONLY)
 if(DEFINED VERSION_INFO)
     add_compile_definitions(VERSION_INFO=${VERSION_INFO})
@@ -18,10 +17,9 @@ endif()
 ################################################################
 # Configuration for depended libraries
 ################################################################
+include(ExternalProject)
 
 # Libmypaint configurations
-
-include(ExternalProject)
 set(MYPAINT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/libmypaint)
 set(MYPAINT_BUILD ${CMAKE_CURRENT_BINARY_DIR}/libmypaint)
 set(MYPAINT_DYNAMIC_LIB ${MYPAINT_BUILD}/lib/libmypaint.so)
@@ -48,6 +46,23 @@ file(MAKE_DIRECTORY ${MYPAINT_INCLUDES})
 set_target_properties(mypaint PROPERTIES IMPORTED_LOCATION "${MYPAINT_DYNAMIC_LIB}")
 set_target_properties(mypaint PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${MYPAINT_INCLUDES}")
 
+
+# mypaint-brushes configurations
+set(MYPAINT_BRUSHES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/mypaint-brushes)
+set(MYPAINT_BRUSHES_BUILD ${CMAKE_CURRENT_BINARY_DIR}/mypaint-brushes)
+ExternalProject_Add(
+        mypaint-brushes
+        PREFIX ${MYPAINT_BRUSHES_BUILD}
+        SOURCE_DIR ${MYPAINT_BRUSHES_DIR}
+        CONFIGURE_COMMAND cd ${MYPAINT_BRUSHES_DIR}
+        COMMAND ${MYPAINT_BRUSHES_DIR}/autogen.sh
+        COMMAND ${MYPAINT_BRUSHES_DIR}/configure
+        --srcdir=${MYPAINT_BRUSHES_DIR} --prefix=${MYPAINT_BRUSHES_BUILD}
+        BUILD_COMMAND make VERBOSE=1
+        INSTALL_COMMAND make install && make clean
+            && ${CMAKE_COMMAND} -E copy_directory ${MYPAINT_BRUSHES_BUILD}/share/mypaint-data/2.0/ ${CMAKE_INSTALL_PREFIX}
+)
+
 # pybind11 configurations
 add_subdirectory(lib/pybind11)
 
@@ -64,23 +79,24 @@ endif()
 # Include path
 ################################################################
 pybind11_add_module(
-        scratchpad.internal SHARED
+        internal SHARED
         csrc/scratchpad.cpp
         csrc/b_scratchpad.cpp
         csrc/init.cpp
 )
 
 target_link_libraries(
-        scratchpad.internal PUBLIC
+        internal PUBLIC
         mypaint
 )
 target_include_directories(
-        scratchpad.internal PUBLIC
+        internal PUBLIC
         lib
         ${CMAKE_CURRENT_SOURCE_DIR}/csrc
         ${MYPAINT_INCLUDES}
         ${PYTHON_NUMPY_INCLUDE_DIR}
 )
-set_target_properties(scratchpad.internal PROPERTIES LINK_FLAGS "-Wl,-rpath,'$ORIGIN'")
-install(TARGETS scratchpad.internal
+add_dependencies(internal mypaint-brushes)
+set_target_properties(internal PROPERTIES LINK_FLAGS "-Wl,-rpath,'$ORIGIN'")
+install(TARGETS internal
         LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX})

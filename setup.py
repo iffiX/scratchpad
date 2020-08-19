@@ -17,7 +17,8 @@ setuptools.setup(
     author_email="iffi@mail.beyond-infinity.com",
     license="MIT",
     python_requires=">=3.5",
-    ext_modules=[CMakeExtension("scratchpad", version=version)],
+    packages=["scratchpad", "scratchpad.brushes"],
+    ext_modules=[CMakeExtension("scratchpad.internal", version=version)],
     cmdclass={'build_ext': CMakeBuildExt},
     classifiers=[
         # How mature is this project? Common values are

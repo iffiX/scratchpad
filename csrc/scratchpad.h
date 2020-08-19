@@ -67,9 +67,13 @@ public:
     void draw(int layer, int brush, const Setting &setting,
               const std::vector<Point> &points);
 
-    py::array renderLayer(int layer, const py::dtype &dtype = "f4");
+    py::array renderLayer(int layer, const py::object &dtype);
 
-    py::array render(const py::dtype &dtype = "f4");
+    py::array renderLayer(int layer, const py::dtype &dtype);
+
+    py::array render(const py::object &dtype);
+
+    py::array render(const py::dtype &dtype);
 
 private:
     int _width = 0, _height = 0;
@@ -77,16 +81,16 @@ private:
     std::vector<MyPaintFixedTiledSurface *> _layers;
     std::vector<float> _layer_opacity;
 
-    py::array &&_convertFix15(const uint16_t *in_layer, const py::dtype &dtype);
+    py::array _convertFix15(const uint16_t *in_layer, const py::dtype &dtype);
 
     template<typename T, std::enable_if_t<std::is_floating_point<T>::value, int> = 0>
-    void _convertFix15ToFloat(const uint16_t *in_layer, T *out_layer, int pixel_num);
+    static void _convertFix15ToFloat(const uint16_t *in_layer, T *out_layer, int pixel_num);
 
     template<typename T, std::enable_if_t<std::is_integral<T>::value, int> = 0>
-    void _convertFix15ToInt(const uint16_t *in_layer, T *out_layer, int pixel_num);
+    static void _convertFix15ToInt(const uint16_t *in_layer, T *out_layer, int pixel_num);
 
-    void _blend(uint16_t *layer_a, uint16_t *layer_b, uint16_t *out_layer,
-                float layer_b_opacity, int pixel_num);
+    static void _blend(uint16_t *layer_a, uint16_t *layer_b, uint16_t *out_layer,
+                       float layer_b_opacity, int pixel_num);
 };
 
 #endif //SCRATCHPAD_H

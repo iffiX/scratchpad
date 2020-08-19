@@ -130,6 +130,10 @@ void ScratchPad::draw(int layer, int brush, const Setting &setting,
     }
 }
 
+py::array ScratchPad::renderLayer(int layer, const py::object &dtype) {
+    return std::move(renderLayer(layer, py::dtype::from_args(dtype)));
+}
+
 py::array ScratchPad::renderLayer(int layer, const py::dtype &dtype) {
     if (dtype.has_fields())
         throw std::invalid_argument("Only support rendering as a flat floating array or integral array!");
@@ -149,12 +153,16 @@ py::array ScratchPad::renderLayer(int layer, const py::dtype &dtype) {
     return std::move(array);
 }
 
+py::array ScratchPad::render(const py::object &dtype) {
+    return std::move(render(py::dtype::from_args(dtype)));
+}
+
 py::array ScratchPad::render(const py::dtype &dtype) {
     if (dtype.has_fields())
         throw std::invalid_argument("Only support rendering as a flat floating array or integral array!");
 
     // must have one or more layers
-    if (_layers.size() == 0)
+    if (_layers.empty())
         throw py::index_error();
 
     auto buffer_1 = new uint16_t[_width * _height * 4];
@@ -199,7 +207,7 @@ py::array ScratchPad::render(const py::dtype &dtype) {
     }
 }
 
-py::array &&ScratchPad::_convertFix15(const uint16_t *in_layer, const py::dtype &dtype) {
+py::array ScratchPad::_convertFix15(const uint16_t *in_layer, const py::dtype &dtype) {
     if (dtype.kind() == 'f') {
         if (dtype.itemsize() == 4) {
             auto result = new float[_width * _height * 4];

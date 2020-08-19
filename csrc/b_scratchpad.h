@@ -29,10 +29,17 @@ public:
 
     std::vector<py::array> renderLayer(const std::vector<int> &pad,
                                        const std::vector<int> &layer,
-                                       const py::dtype& dtype="f4");
+                                       const py::object& dtype);
+
+    std::vector<py::array> renderLayer(const std::vector<int> &pad,
+                                       const std::vector<int> &layer,
+                                       const py::dtype& dtype);
 
     std::vector<py::array> render(const std::vector<int> &pad,
-                                  const py::dtype& dtype="f4");
+                                  const py::object& dtype);
+
+    std::vector<py::array> render(const std::vector<int> &pad,
+                                  const py::dtype& dtype);
 
 private:
     int _brush_num = 0;
