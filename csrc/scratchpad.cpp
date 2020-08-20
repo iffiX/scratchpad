@@ -1,29 +1,53 @@
 #include "scratchpad.h"
 #include "fix15.h"
+#include "util.h"
+#include <fmt/format.h>
 #include <cmath>
+#include <cstdlib>
+#include <stdexcept>
 
-#define CEIL(a, b) ( ((a) + (b) - 1) / (b))
-#define ALIGN(a, b) (CEIL(a, b) * (b))
-#define IN_RANGE(var, low, high) (((var) <= (high)) && ((var) >= (low)))
 
 #define CONVERT_AND_RETURN_F(type) \
     auto tmp = new type[r_w * r_h * 4];\
-    auto result = new type[r_w * r_h * 4];\
+    void* result =  malloc(sizeof(type) * r_w * r_h * 4);\
+    if (result == NULL)\
+        throw std::bad_alloc();\
     _convertFix15ToFloat<type>(in_layer, tmp, r_w * r_h);\
-    _reformat<type>(tmp, result, r_w, r_h, MYPAINT_TILE_SIZE);\
+    _reformat<type>(tmp, static_cast<type*>(result), r_w, r_h, MYPAINT_TILE_SIZE);\
     delete [] tmp;\
-    auto capsule = py::capsule(result, [](void *v) { delete static_cast<type*>(v); });\
-    return std::move(py::array({h, w, 4}, {r_w * 4 * s, 4 * s, s}, result, capsule))
+    return result
+
 
 #define CONVERT_AND_RETURN_I(type) \
     auto tmp = new type[r_w * r_h * 4];\
-    auto result = new type[r_w * r_h * 4];\
+    void* result =  malloc(sizeof(type) * r_w * r_h * 4);\
+    if (result == NULL)\
+        throw std::bad_alloc();\
     _convertFix15ToInt<type>(in_layer, tmp, r_w * r_h);\
-    _reformat<type>(tmp, result, r_w, r_h, MYPAINT_TILE_SIZE);\
+    _reformat<type>(tmp, static_cast<type*>(result), r_w, r_h, MYPAINT_TILE_SIZE);\
     delete [] tmp;\
-    auto capsule = py::capsule(result, [](void *v) { delete static_cast<type*>(v); });\
-    return std::move(py::array({h, w, 4}, {r_w * 4 * s, 4 * s, s}, result, capsule))
+    return result
 
+
+ScratchPad::ScratchPad(const ScratchPad &pad)
+: _width(pad._width), _height(pad._width),
+  _brushes(pad._brushes), _layers(pad._layers),
+  _layer_opacity(pad._layer_opacity) {
+    std::cout << "Copy called!" << std::endl;
+    for (auto brush: _brushes)
+        mypaint_brush_ref(brush);
+    for (auto layer: _layers)
+        mypaint_surface_ref(mypaint_fixed_tiled_surface_interface(layer));
+}
+
+ScratchPad::ScratchPad(ScratchPad &&pad) noexcept {
+    std::cout << "Move called!" << std::endl;
+    _width = pad._width;
+    _height = pad._height;
+    _brushes.swap(pad._brushes);
+    _layers.swap(pad._layers);
+    _layer_opacity.swap(pad._layer_opacity);
+}
 
 ScratchPad::~ScratchPad() {
     // will destroy instances completely if ref count > 1
@@ -68,7 +92,7 @@ void ScratchPad::addLayer() {
 
 void ScratchPad::popLayer(int layer) {
     if (layer >= _layers.size() or layer < 0)
-        throw py::index_error();
+        throw std::out_of_range(fmt::format("Invalid layer index {}", layer));
     MyPaintFixedTiledSurface *layer_ptr = _layers[layer];
     mypaint_surface_unref(mypaint_fixed_tiled_surface_interface(layer_ptr));
     _layers.erase(_layers.begin() + layer);
@@ -77,7 +101,7 @@ void ScratchPad::popLayer(int layer) {
 
 void ScratchPad::setOpacity(int layer, float opacity) {
     if (layer >= _layers.size() or layer < 0)
-        throw py::index_error();
+        throw std::out_of_range(fmt::format("Invalid layer index {}", layer));
     if (opacity < 0 || opacity > 1)
         throw std::invalid_argument("Opacity must be within range [0, 1]!");
     _layer_opacity[layer] = opacity;
@@ -98,9 +122,9 @@ std::tuple<int, int> ScratchPad::getPadSize() {
 void ScratchPad::draw(int layer, int brush, const Setting &setting,
                       const std::vector<Point> &points) {
     if (layer >= _layers.size() or layer < 0)
-        throw py::index_error();
+        throw std::out_of_range(fmt::format("Invalid layer index {}", layer));
     if (brush >= _brushes.size() or brush < 0)
-        throw py::index_error();
+        throw std::out_of_range(fmt::format("Invalid brush index {}", brush));
 
     auto layer_ptr = (MyPaintSurface*)_layers[layer];
     auto brush_ptr = _brushes[brush];
@@ -145,23 +169,37 @@ void ScratchPad::draw(int layer, int brush, const Setting &setting,
                                     point.xtilt * 2 - 1,
                                     point.ytilt * 2 - 1,
                                     point.dtime * 0.1);
-        }
-        else
+        } else
             throw std::invalid_argument("Invalid point value, all point values must be in range of 0.0 to 1.0!");
     }
     MyPaintRectangle roi;
     mypaint_surface_end_atomic(layer_ptr, &roi);
 }
 
-py::array ScratchPad::renderLayer(int layer, const py::object &dtype) {
-    return std::move(renderLayer(layer, py::dtype::from_args(dtype)));
-}
-
-py::array ScratchPad::renderLayer(int layer, const py::dtype &dtype) {
+py::array ScratchPad::renderLayer(int layer, const py::object &dt) {
+    auto dtype = py::dtype::from_args(dt);
     if (dtype.has_fields())
         throw std::invalid_argument("Only support rendering as a flat floating array or integral array!");
+    auto kind = dtype.kind();
+    auto item_size = dtype.itemsize();
+    void *array;
+    {
+        py::gil_scoped_release release;
+        array = renderLayer(layer, kind, item_size);
+    }
+    auto capsule = py::capsule(array, [](void *v) { free(v); });
+
+    int real_width = ALIGN(_width, MYPAINT_TILE_SIZE);
+
+    return std::move(py::array(dtype,
+                               {_height, _width, 4},
+                               {real_width * 4 * item_size, 4 * item_size, item_size},
+                               array, capsule));
+}
+
+void* ScratchPad::renderLayer(int layer, char kind, int item_size) {
     if (layer >= _layers.size() or layer < 0)
-        throw py::index_error();
+        throw std::out_of_range(fmt::format("Invalid layer index {}", layer));
 
     // Start a new operation request
     MyPaintTileRequest request;
@@ -180,26 +218,39 @@ py::array ScratchPad::renderLayer(int layer, const py::dtype &dtype) {
     int real_height = ALIGN(_height, MYPAINT_TILE_SIZE);
 
     auto layer_ptr = (MyPaintTiledSurface*)_layers[layer];
-    // request to operate on mipmap_level=0, tx=0, ty=0
-    // in fixed tiled surface tx, ty are absolute coordinates of the starting pixel.
+    // request to operate on mipmap_level=0, tile with x=0, ty=0
     mypaint_tile_request_init(&request, 0, 0, 0, TRUE);
     mypaint_tiled_surface_tile_request_start(layer_ptr, &request);
-    auto array = _convertFix15(request.buffer, dtype, real_width, real_height, _width, _height);
+    auto array = _convertFix15(request.buffer, kind, item_size, real_width, real_height);
     mypaint_tiled_surface_tile_request_end(layer_ptr, &request);
-    return std::move(array);
+    return array;
 }
 
-py::array ScratchPad::render(const py::object &dtype) {
-    return std::move(render(py::dtype::from_args(dtype)));
-}
-
-py::array ScratchPad::render(const py::dtype &dtype) {
+py::array ScratchPad::render(const py::object &dt) {
+    auto dtype = py::dtype::from_args(dt);
     if (dtype.has_fields())
         throw std::invalid_argument("Only support rendering as a flat floating array or integral array!");
+    auto kind = dtype.kind();
+    auto item_size = dtype.itemsize();
+    void *array;
+    {
+        py::gil_scoped_release release;
+        array = render(kind, item_size);
+    }
+    auto capsule = py::capsule(array, [](void *v) { free(v); });
 
+    int real_width = ALIGN(_width, MYPAINT_TILE_SIZE);
+
+    return std::move(py::array(dtype,
+                               {_height, _width, 4},
+                               {real_width * 4 * item_size, 4 * item_size, item_size},
+                               array, capsule));
+}
+
+void* ScratchPad::render(char kind, int item_size) {
     // must have one or more layers
     if (_layers.empty())
-        throw py::index_error();
+        throw std::out_of_range("Layers are empty!");
 
     // copy the first layer to ping-pong buffer.
     MyPaintTileRequest first_request;
@@ -214,11 +265,11 @@ py::array ScratchPad::render(const py::dtype &dtype) {
     bool ping_pong = false;
 
     mypaint_tile_request_init(&first_request, 0, 0, 0, TRUE);
-    mypaint_tiled_surface_tile_request_start((MyPaintTiledSurface*)_layers[0], &first_request);
+    mypaint_tiled_surface_tile_request_start((MyPaintTiledSurface *) _layers[0], &first_request);
     memcpy(buffer_1, first_request.buffer, real_width * real_height * 4 * sizeof(uint16_t));
-    mypaint_tiled_surface_tile_request_end((MyPaintTiledSurface*)_layers[0], &first_request);
+    mypaint_tiled_surface_tile_request_end((MyPaintTiledSurface *) _layers[0], &first_request);
 
-    for (size_t i=1; i < _layers.size(); i++) {
+    for (size_t i = 1; i < _layers.size(); i++) {
         // Blend current top layer with blended result
         MyPaintTileRequest request;
         auto layer_ptr = (MyPaintTiledSurface *) _layers[i];
@@ -237,58 +288,57 @@ py::array ScratchPad::render(const py::dtype &dtype) {
     // Note: ping_pong is inverted here because of ping_pong = !ping_pong
     if (ping_pong) {
         delete [] buffer_1;
-        auto array = _convertFix15(buffer_2, dtype, real_width, real_height, _width, _height);
+        auto array = _convertFix15(buffer_2, kind, item_size, real_width, real_height);
         delete [] buffer_2;
-        return std::move(array);
+        return array;
     }
     else {
         delete [] buffer_2;
-        auto array = _convertFix15(buffer_1, dtype, real_width, real_height, _width, _height);
+        auto array = _convertFix15(buffer_1, kind, item_size, real_width, real_height);
         delete [] buffer_1;
-        return std::move(array);
+        return array;
     }
 }
 
-py::array ScratchPad::_convertFix15(const uint16_t *in_layer, const py::dtype &dtype, int r_w, int r_h, int w, int h) {
-    int s = dtype.itemsize();
-    if (dtype.kind() == 'f') {
-        if (dtype.itemsize() == 4) {
+void* ScratchPad::_convertFix15(const uint16_t *in_layer, char kind, int item_size, int r_w, int r_h) {
+    if (kind == 'f') {
+        if (item_size == 4) {
             CONVERT_AND_RETURN_F(float);
         }
-        else if (dtype.itemsize() == 8) {
+        else if (item_size == 8) {
             CONVERT_AND_RETURN_F(double);
         }
         else
             throw std::invalid_argument("Only float32 and float64 are supported in all floating types!");
     }
-    else if (dtype.kind() == 'B') {
+    else if (kind == 'B') {
         CONVERT_AND_RETURN_I(uint8_t);
     }
-    else if (dtype.kind() == 'i') {
-        if (dtype.itemsize() == 2) {
+    else if (kind == 'i') {
+        if (item_size == 2) {
             CONVERT_AND_RETURN_I(int16_t);
         }
-        else if (dtype.itemsize() == 4) {
+        else if (item_size == 4) {
             CONVERT_AND_RETURN_I(int32_t);
         }
-        else if (dtype.itemsize() == 8) {
+        else if (item_size == 8) {
             CONVERT_AND_RETURN_I(int64_t);
         }
         else
             throw std::invalid_argument("Only int16, int32, int64, uint8, uint16, uint32, uint64 are supported "
                                         "in all integral types!");
     }
-    else if (dtype.kind() == 'u') {
-        if (dtype.itemsize() == 1) {
+    else if (kind == 'u') {
+        if (item_size == 1) {
             CONVERT_AND_RETURN_I(uint8_t);
         }
-        else if (dtype.itemsize() == 2) {
+        else if (item_size == 2) {
             CONVERT_AND_RETURN_I(uint16_t);
         }
-        else if (dtype.itemsize() == 4) {
+        else if (item_size == 4) {
             CONVERT_AND_RETURN_I(uint32_t);
         }
-        else if (dtype.itemsize() == 8) {
+        else if (item_size == 8) {
             CONVERT_AND_RETURN_I(uint64_t);
         }
         else
@@ -320,6 +370,7 @@ void ScratchPad::_reformat(T *in_layer, T *out_layer, int r_w, int r_h, int tile
 }
 
 template<typename T, std::enable_if_t<std::is_floating_point<T>::value, int>>
+
 void ScratchPad::_convertFix15ToFloat(const uint16_t *in_layer, T *out_layer, int pixel_num) {
     // pixel_num = w * h
     uint32_t r, g, b, a;
@@ -345,17 +396,20 @@ void ScratchPad::_convertFix15ToFloat(const uint16_t *in_layer, T *out_layer, in
         out_layer[offset] = r / T(1u << 15u);
         out_layer[offset + 1] = g / T(1u << 15u);
         out_layer[offset + 2] = b / T(1u << 15u);
-        out_layer[offset + 3] = a / T(1u << 15u);
+
+        // alpha needs to be divided by 2
+        out_layer[offset + 3] = a / T(1u << 16u);
     }
 }
 
 template<typename T, std::enable_if_t<std::is_integral<T>::value, int>>
+
 void ScratchPad::_convertFix15ToInt(const uint16_t *in_layer, T *out_layer, int pixel_num) {
     // pixel_num = w * h
     uint32_t r, g, b, a;
 
     int max = pixel_num * 4;
-    #pragma omp parallel for
+    #pragma omp parallel for private(r, g, b, a)
     for (int offset = 0; offset < max; offset += 4) {
         r = in_layer[offset];
         g = in_layer[offset + 1];
@@ -375,10 +429,11 @@ void ScratchPad::_convertFix15ToInt(const uint16_t *in_layer, T *out_layer, int 
         out_layer[offset] = (r * 255 + (1u << 14u)) / (1u << 15u);
         out_layer[offset + 1] = (g * 255 + (1u << 14u)) / (1u << 15u);
         out_layer[offset + 2] = (b * 255 + (1u << 14u)) / (1u << 15u);
-        out_layer[offset + 3] = (a * 255 + (1u << 14u)) / (1u << 15u);
+
+        // alpha needs to be divided by 2
+        out_layer[offset + 3] = (a * 255 + (1u << 14u)) / (1u << 16u);
     }
 }
-
 
 void ScratchPad::_blend(uint16_t *layer_a, uint16_t *layer_b, uint16_t *out_layer,
                         float layer_a_opacity, int pixel_num) {

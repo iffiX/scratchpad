@@ -3,7 +3,9 @@
 
 #include <tuple>
 #include <vector>
+#include <mutex>
 #include <type_traits>
+#include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 #include "mypaint-all.h"
@@ -44,8 +46,13 @@ struct Point {
             pressure(pressure), dtime(dtime) {}
 };
 
+class BatchedScratchPad;
+
 class ScratchPad {
 public:
+    ScratchPad() = default;
+    ScratchPad(ScratchPad &&pad) noexcept;
+    ScratchPad(const ScratchPad &pad);
     ~ScratchPad();
 
     void loadBrush(const std::string &brush_string);
@@ -69,19 +76,21 @@ public:
 
     py::array renderLayer(int layer, const py::object &dtype);
 
-    py::array renderLayer(int layer, const py::dtype &dtype);
+    void* renderLayer(int layer, char kind, int item_size);
 
     py::array render(const py::object &dtype);
 
-    py::array render(const py::dtype &dtype);
+    void* render(char kind, int item_size);
 
 private:
+    friend class BatchedScratchPad;
+
     int _width = 0, _height = 0;
     std::vector<MyPaintBrush *> _brushes;
     std::vector<MyPaintFixedTiledSurface *> _layers;
     std::vector<float> _layer_opacity;
 
-    static py::array _convertFix15(const uint16_t *in_layer, const py::dtype &dtype, int r_w, int r_h, int w, int h);
+    static void* _convertFix15(const uint16_t *in_layer, char kind, int item_size, int r_w, int r_h);
 
     template<typename T>
     static void _reformat(T *in_layer, T *out_layer, int r_w, int r_h, int tile_size);

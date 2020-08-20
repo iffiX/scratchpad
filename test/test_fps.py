@@ -8,12 +8,13 @@ from scratchpad import (
 from time import time
 import numpy as np
 
-# 11ms per frame, per layer at 1024 * 1024, using 4 threads
+# 11ms per frame, per layer at 1024 * 1024, using 4 threads, float
+# 4.5ms ~ 7.5ms per frame, per layer at 1024 * 1024, using 4 threads, uint8
 pad_size = (1024, 1024)
 
 
 if __name__ == "__main__":
-    set_omp_max_threads(4)
+    #set_omp_max_threads(4)
     p = ScratchPad()
     p.load_brush(get_brushes()[0])
     p.reset_pad(*pad_size, 1)

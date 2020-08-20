@@ -8,14 +8,38 @@
 
 #endif
 
+#ifdef USE_DEBUG
+#include <execinfo.h>
+#include <signal.h>
+
+void handler(int sig) {
+    void *array[20];
+    size_t size;
+
+    // get void*'s for all entries on the stack
+    size = backtrace(array, 20);
+
+    // print out all the frames to stderr
+    fprintf(stderr, "Error: signal %d:\n", sig);
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+    exit(1);
+}
+#endif
+
+int omp_max_threads = omp_get_max_threads();
+
 void set_omp_max_threads(int num) {
     if (num <= 0)
         throw std::invalid_argument("Thread num must be a number larger than 0!");
     int cores = omp_get_max_threads();
-    omp_set_num_threads(cores > num ? num : cores);
+    omp_max_threads = cores > num ? num : cores;
+    omp_set_num_threads(omp_max_threads);
 }
 
 PYBIND11_MODULE(internal, m) {
+#ifdef USE_DEBUG
+    signal(SIGSEGV, handler);
+#endif
     m.def("set_omp_max_threads", &set_omp_max_threads);
     py::class_<Setting>(m,
                         "Setting",
@@ -108,7 +132,7 @@ PYBIND11_MODULE(internal, m) {
             .def("get_brush_num", &ScratchPad::getBrushNum)
             .def("get_layer_num", &ScratchPad::getLayerNum)
             .def("get_pad_size", &ScratchPad::getPadSize)
-            .def("draw", &ScratchPad::draw)
+            .def("draw", &ScratchPad::draw, py::call_guard<py::gil_scoped_release>())
             .def("render_layer", py::overload_cast<int, const py::object &>(&ScratchPad::renderLayer))
             .def("render", py::overload_cast<const py::object &>(&ScratchPad::render));
 
@@ -125,7 +149,7 @@ PYBIND11_MODULE(internal, m) {
             .def("get_brush_num", &BatchedScratchPad::getBrushNum)
             .def("get_layer_num", &BatchedScratchPad::getLayerNum)
             .def("get_pad_size", &BatchedScratchPad::getPadSize)
-            .def("draw", &BatchedScratchPad::draw)
+            .def("draw", &BatchedScratchPad::draw, py::call_guard<py::gil_scoped_release>())
             .def("render_layer", py::overload_cast<const std::vector<int> &,
                                                    const std::vector<int> &,
                                                    const py::object &>(&BatchedScratchPad::renderLayer))

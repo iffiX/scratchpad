@@ -10,20 +10,27 @@ import matplotlib.pyplot as plt
 
 
 def show_image(array, title="image"):
-    arr = array.astype(np.float32)
-    fig = plt.figure()
-    fig.canvas.set_window_title(title)
-    ax = fig.add_subplot("121")
-    ax.set_facecolor((0.0, 0.0, 0.0))
-    ax.imshow(arr, vmin=np.min(arr), vmax=np.max(arr))
+    if isinstance(array.dtype, np.floating):
+        arr = array.astype(np.float32)
+        fig = plt.figure()
+        fig.canvas.set_window_title(title)
+        ax = fig.add_subplot("121")
+        ax.set_facecolor((0.0, 0.0, 0.0))
+        ax.imshow(arr, vmin=np.min(arr), vmax=np.max(arr))
 
-    ax2 = fig.add_subplot("122")
-    ax2.set_facecolor((0.0, 0.0, 0.0))
-    pix_range = np.max(arr) - np.min(arr)
-    ax2.imshow((arr - np.min(arr)) / (pix_range + 1e-6), vmin=0, vmax=1)
+        ax2 = fig.add_subplot("122")
+        ax2.set_facecolor((0.0, 0.0, 0.0))
+        pix_range = np.max(arr) - np.min(arr)
+        ax2.imshow((arr - np.min(arr)) / (pix_range + 1e-6), vmin=0, vmax=1)
+    else:
+        fig = plt.figure()
+        fig.canvas.set_window_title(title)
+        ax = fig.add_subplot("111")
+        ax.set_facecolor((0.0, 0.0, 0.0))
+        ax.imshow(array)
 
 
-pad_size = (1024, 1024)
+pad_size = (1023, 1001)
 
 
 if __name__ == "__main__":
